@@ -54,7 +54,6 @@ const neededFiles = {
     csgoEnglish: 'resource/csgo_english.txt'
 };
 
-
 /*
     Downloads the given HTTPS file
 */
@@ -459,6 +458,18 @@ class CSGOCdn extends EventEmitter {
         } else {
             csgoEnglish = await downloadFile(`${repository}${neededFiles.csgoEnglish}`);
             await writeFile(`./${this.config.directory}/${neededFiles.csgoEnglish}`, csgoEnglish, {encoding: 'utf-8'});
+        }
+
+        if (this.config.lang) {
+            const file = `resource/csgo_${this.config.lang}.txt`;
+            const filepath = `${this.config.directory}/${file}`;
+            if (!existsSync(filepath)) {
+                await writeFile(
+                    filepath,
+                    await downloadFile(`${repository}${file}`),
+                    { encoding: 'utf-8' }
+                );
+            }
         }
 
         this.itemsGame = vdf.parse(itemsGame)['items_game'];
