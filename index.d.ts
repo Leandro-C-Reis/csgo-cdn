@@ -46,7 +46,7 @@ declare module "csgo-cdn" {
     cases: boolean, // whether to obtain the vpk for cases
     tools: boolean, // whether to obtain the vpk for tools
     statusIcons: boolean, // whether to obtain the vpk for status icons
-    donwloadVPK: boolean, // whether to download the vpk files
+    downloadVPK: boolean, // whether to download the vpk files
     lang?: string // Optional language support
   }
 

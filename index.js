@@ -23,7 +23,7 @@ const defaultConfig = {
     cases: true,
     tools: true,
     statusIcons: true,
-    donwloadVPK: false,
+    downloadVPK: false,
     logLevel: 'info',
     vrfBinary: 'Decompiler',
     depotDownloader: 'DepotDownloader',
@@ -282,7 +282,7 @@ class CSGOCdn extends EventEmitter {
 
         this.#loadVPK();
 
-        if (this.config.donwloadVPK) {
+        if (this.config.downloadVPK) {
             await this.#downloadVPKFiles();
         }
 
