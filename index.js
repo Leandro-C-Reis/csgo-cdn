@@ -23,6 +23,7 @@ const defaultConfig = {
     cases: true,
     tools: true,
     statusIcons: true,
+    donwloadVPK: false,
     logLevel: 'info',
     vrfBinary: 'Decompiler',
     depotDownloader: 'DepotDownloader',
@@ -282,7 +283,9 @@ class CSGOCdn extends EventEmitter {
 
         this.#loadVPK();
 
-        await this.#downloadVPKFiles();
+        if (this.config.donwloadVPK) {
+            await this.#downloadVPKFiles();
+        }
 
         this.#loadResources();
 
@@ -290,9 +293,6 @@ class CSGOCdn extends EventEmitter {
             .keys(neededDirectories)
             .filter((key) => this.config[key] === true)
             .map((key) => neededDirectories[key])
-            .concat(
-                Object.values(neededFiles)
-            );
 
         // In CS:GO it was possible to just extract the image from the VPK, in CS2 this is not the case anymore
         // to work around this, we will still download all the required VPK's but then using https://github.com/ValveResourceFormat/ValveResourceFormat
@@ -301,7 +301,7 @@ class CSGOCdn extends EventEmitter {
         await Promise.all(
             pathsToDump.map((path) => new Promise((resolve, reject) => {
                 this.log.debug(`Dumping ${path}...`);
-                exec(`${this.config.directory}/${this.config.vrfBinary} --input ${this.config.directory}/game/csgo/pak01_dir.vpk --vpk_filepath ${path} -o data -d > /dev/null`, (error) => {
+                exec(`${this.config.directory}/${this.config.vrfBinary} --input ${this.config.directory}/game/csgo/pak01_dir.vpk --vpk_filepath ${path} -o ${this.config.directory} -d > /dev/null`, (error) => {
                     if (error) {
                         console.error(`exec error: ${error}`);
                     }
@@ -684,8 +684,6 @@ class CSGOCdn extends EventEmitter {
         const fileName = large ? `${name}_large_png` : `${name}_png`;
         const path = this.vpkStickerFiles.find((t) => t.endsWith(`${fileName}.vtex_c`));
 
-        console.log(path)
-        console.log(this.vpkStickerFiles.filter(f => f.includes(fileName)))
         if (path) return this.getPathURL(path, 'local');
     }
 
@@ -843,7 +841,6 @@ class CSGOCdn extends EventEmitter {
         const stickerName = match[1];
 
         for (const tag of this.csgoEnglish['inverted'][stickerName] || []) {
-            console.log(tag)
             const stickerTag = `#${tag}`;
 
             const stickerKits = this.itemsGame.sticker_kits;
@@ -856,12 +853,9 @@ class CSGOCdn extends EventEmitter {
 
             const kit  = stickerKits[kitIndex];
 
-            console.log(kit)
-
             if (!kit || !kit.sticker_material) continue;
 
-            const url = this.getStickerURL(stickerKits[kitIndex].sticker_material, true);
-            console.log(url)
+            const url = this.getStickerURL(kit.sticker_material, false);
 
             if (url) {
                 return url;
