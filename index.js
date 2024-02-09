@@ -1,5 +1,6 @@
 import EventEmitter from 'events';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync, statSync } from 'fs';
+import { readFile, writeFile } from 'fs/promises';
 import vpk from 'vpk';
 import vdf from 'simple-vdf';
 import { hashSync } from 'hasha';
@@ -9,6 +10,7 @@ import { HttpClient } from '@doctormckay/stdlib/http.js'
 import AdmZip from 'adm-zip';
 import os from 'node:os';
 import { pid } from 'node:process';
+import https from 'https';
 
 const defaultConfig = {
     directory: 'data',
@@ -51,6 +53,35 @@ const neededFiles = {
     csgoEnglish: 'resource/csgo_english.txt'
 };
 
+
+/*
+    Downloads the given HTTPS file
+*/
+const downloadFile = function(url) {
+    return new Promise((resolve, reject) => {
+        https.get(url, function(res) {
+            if (res.statusCode !== 200) {
+                return resolve();
+            }
+    
+            res.setEncoding('utf8');
+            let data = '';
+    
+            res.on('error', function(err) {
+                reject(err);
+            });
+    
+            res.on('data', function(chunk) {
+                data += chunk;
+            });
+    
+            res.on('end', function() {
+                resolve(data);
+            });
+        });
+    })
+};
+
 class CSGOCdn extends EventEmitter {
     get ready() {
         return this.ready_ || false;
@@ -88,7 +119,7 @@ class CSGOCdn extends EventEmitter {
 
         this.config = Object.assign(defaultConfig, config);
 
-        this.createDataDirectory();
+        this.#createDataDirectory();
 
         this.user = steamUser;
 
@@ -112,22 +143,34 @@ class CSGOCdn extends EventEmitter {
             this.log.debug('Steam not ready, waiting for logon');
 
             this.user.once('loggedOn', () => {
-                this.updateLoop();
+                this.#updateLoop();
             });
         }
         else {
-            this.updateLoop();
+            this.#updateLoop();
         }
     }
 
     /**
      * Creates the data directory specified in the config if it doesn't exist
      */
-    createDataDirectory() {
+    #createDataDirectory() {
         const dir = `./${this.config.directory}`;
 
         if (!existsSync(dir)){
             mkdirSync(dir);
+        }
+        
+        if (!existsSync(dir + "/" + neededFiles.itemsGame.replace('/items_game.txt', ""))) {
+            mkdirSync(dir + "/" + neededFiles.itemsGame.replace('/items_game.txt', ""), {recursive: true});
+        }
+
+        if (!existsSync(dir + "/" + neededFiles.itemsGameCdn.replace('/items_game_cdn.txt', ""))) {
+            mkdirSync(dir + "/" + neededFiles.itemsGameCdn.replace('/items_game_cdn.txt', ""), {recursive: true});
+        }
+
+        if (!existsSync(dir + "/" + neededFiles.csgoEnglish.replace('/csgo_english.txt', ""))) {
+            mkdirSync(dir + "/" + neededFiles.csgoEnglish.replace('/csgo_english.txt', ""), {recursive: true});
         }
     }
 
@@ -135,7 +178,7 @@ class CSGOCdn extends EventEmitter {
      * Cleans up any old filelist.txt files that are older than an hour
      * @return {void}
      */
-    cleanup() {
+    #cleanup() {
         const files = readdirSync(`./${this.config.directory}`).filter(fn => fn.startsWith(this.config.fileList));
 
         for (const file of files) {
@@ -149,14 +192,14 @@ class CSGOCdn extends EventEmitter {
 
     /**
      * Runs the update loop at the specified config interval
-     * @return {Promise<undefined>|void}
+     * @return {Promise<void>}
      */
-    updateLoop() {
+    async #updateLoop() {
         if (this.config.updateInterval > 0) {
             this.log.info(`Auto-updates enabled, checking for updates every ${this.config.updateInterval} seconds`);
-            this.update().then(() => {
+            await this.#update().then(() => {
                 setTimeout(() => {
-                    this.updateLoop();
+                    this.#updateLoop();
                 }, this.config.updateInterval * 1000);
             })
         }
@@ -165,12 +208,12 @@ class CSGOCdn extends EventEmitter {
 
             // Try to load the resources locally
             try {
-                this.loadResources();
-                this.loadVPK();
+                await this.#loadResources();
+                this.#loadVPK();
                 this.ready = true;
             } catch(e) {
                 this.log.warn('Needed CS:GO files not installed');
-                this.update();
+                await this.#update();
             }
         }
     }
@@ -178,7 +221,7 @@ class CSGOCdn extends EventEmitter {
     /**
      * Returns the product info for CSGO, with its depots and packages
      */
-    getProductInfo() {
+    #getProductInfo() {
         this.log.debug('Obtaining CS:GO product info');
         return new Promise((resolve, reject) => {
             this.user.getProductInfo([APP_ID], [], true, (apps, packages, unknownApps, unknownPackages) => {
@@ -191,9 +234,9 @@ class CSGOCdn extends EventEmitter {
      * Returns the latest CSGO manifest ID for the public DEPOT_ID depot
      * @return {*|PromiseLike<*[]>|Promise<*[]>} DEPOT_ID Depot Manifest ID
      */
-    getLatestManifestId() {
+    #getLatestManifestId() {
         this.log.debug('Obtaining latest manifest ID');
-        return this.getProductInfo().then(([apps, packages, unknownApps, unknownPackages]) => {
+        return this.#getProductInfo().then(([apps, packages, unknownApps, unknownPackages]) => {
             const csgo = packages[APP_ID].appinfo;
             const commonDepot = csgo.depots[DEPOT_ID];
 
@@ -209,9 +252,8 @@ class CSGOCdn extends EventEmitter {
      *
      * @return {Promise<void>}
      */
-    async update() {
+    async #update() {
         this.log.info('Checking for CS:GO file updates');
-
 
         if (!this.steamReady) {
             this.log.warn(`Steam not ready, can't check for updates`);
@@ -220,31 +262,37 @@ class CSGOCdn extends EventEmitter {
 
         if (!existsSync(`${this.config.directory}/${this.config.vrfBinary}`)) {
             this.log.error(`VRF binary not found at ${this.config.vrfBinary}, downloading...`);
-            await this.downloadVRF();
+            await this.#downloadVRF();
         }
 
         if (!existsSync(`${this.config.directory}/${this.config.depotDownloader}`)) {
             this.log.error(`DepotDownloader binary not found at ${this.config.depotDownloader}, downloading...`);
-            await this.downloadDepotDownloader();
+            await this.#downloadDepotDownloader();
         }
 
-        writeFileSync(`${this.config.directory}/${this.config.fileList}-${pid}`, 'game\\csgo\\pak01_dir.vpk');
+        await writeFile(`${this.config.directory}/${this.config.fileList}-${pid}`, 'game\\csgo\\pak01_dir.vpk');
 
         this.log.debug('Downloading require static files');
 
-        await this.downloadFiles();
+        await this.#downloadFiles();
 
         unlinkSync(`${this.config.directory}/${this.config.fileList}-${pid}`);
 
         this.log.debug('Loading static file resources');
 
-        this.loadVPK();
+        this.#loadVPK();
 
-        await this.downloadVPKFiles();
+        await this.#downloadVPKFiles();
 
-        this.loadResources();
+        this.#loadResources();
 
-        const pathsToDump = Object.keys(neededDirectories).filter((f) => this.config[f] === true ).map((f) => neededDirectories[f]).concat(Object.keys(neededFiles).map((f) => neededFiles[f]));
+        const pathsToDump = Object
+            .keys(neededDirectories)
+            .filter((key) => this.config[key] === true)
+            .map((key) => neededDirectories[key])
+            .concat(
+                Object.values(neededFiles)
+            );
 
         // In CS:GO it was possible to just extract the image from the VPK, in CS2 this is not the case anymore
         // to work around this, we will still download all the required VPK's but then using https://github.com/ValveResourceFormat/ValveResourceFormat
@@ -253,7 +301,7 @@ class CSGOCdn extends EventEmitter {
         await Promise.all(
             pathsToDump.map((path) => new Promise((resolve, reject) => {
                 this.log.debug(`Dumping ${path}...`);
-                exec(`${this.config.directory}/${this.config.vrfBinary} --input data/game/csgo/pak01_dir.vpk --vpk_filepath ${path} -o data -d > /dev/null`, (error) => {
+                exec(`${this.config.directory}/${this.config.vrfBinary} --input ${this.config.directory}/game/csgo/pak01_dir.vpk --vpk_filepath ${path} -o data -d > /dev/null`, (error) => {
                     if (error) {
                         console.error(`exec error: ${error}`);
                     }
@@ -266,7 +314,7 @@ class CSGOCdn extends EventEmitter {
         this.log.info('Finished updating CS:GO files');
         this.ready = true;
 
-        this.cleanup();
+        this.#cleanup();
     }
 
     /**
@@ -274,7 +322,7 @@ class CSGOCdn extends EventEmitter {
      *
      * @returns {string} Platform-architecture string
      */
-    getPlatform() {
+    #getPlatform() {
         const platform = os.platform();
         const architecture = os.arch();
 
@@ -319,7 +367,7 @@ class CSGOCdn extends EventEmitter {
      *
      * @return {Promise<string>} Latest tag name
      */
-    async getLatestGitTag(repository) {
+    async #getLatestGitTag(repository) {
         let latestTag = await this.client.request({
             method: 'GET',
             url: `https://api.github.com/repos/${repository}/releases/latest`
@@ -341,9 +389,9 @@ class CSGOCdn extends EventEmitter {
      *
      * @param binaryName Name of the binary to download
      */
-    async getBinary(repository, binaryName) {
-        const latestTag = await this.getLatestGitTag(repository);
-        const platform = this.getPlatform();
+    async #getBinary(repository, binaryName) {
+        const latestTag = await this.#getLatestGitTag(repository);
+        const platform = this.#getPlatform();
 
         let binary = await this.client.request({
             method: 'GET',
@@ -355,29 +403,29 @@ class CSGOCdn extends EventEmitter {
             throw new Error(`Failed to get latest release ${binary.statusCode}`);
         }
 
-        writeFileSync(`./data/${binaryName}.zip`, binary.rawBody);
-        const zip = new AdmZip(`./data/${binaryName}.zip`);
-        zip.extractAllTo('./data', true);
+        writeFileSync(`./${this.config.directory}/${binaryName}.zip`, binary.rawBody);
+        const zip = new AdmZip(`./${this.config.directory}/${binaryName}.zip`);
+        zip.extractAllTo(`./${this.config.directory}`, true);
 
-        unlinkSync(`./data/${binaryName}.zip`);
+        unlinkSync(`./${this.config.directory}/${binaryName}.zip`);
 
         if (platform !== 'win32') {
-            chmodSync(`./data/${binaryName}`, '755');
+            chmodSync(`./${this.config.directory}/${binaryName}`, '755');
         }
     }
 
     /**
      * Downloads the latest version of https://github.com/SteamRE/DepotDownloader
      */
-    async downloadDepotDownloader() {
-        await this.getBinary('SteamRE/DepotDownloader', 'DepotDownloader');
+    async #downloadDepotDownloader() {
+        await this.#getBinary('SteamRE/DepotDownloader', 'DepotDownloader');
     }
 
     /**
      * Downloads the latest version of https://github.com/ValveResourceFormat/ValveResourceFormat
     */
-    async downloadVRF() {
-        await this.getBinary('ValveResourceFormat/ValveResourceFormat', 'Decompiler');
+    async #downloadVRF() {
+        await this.#getBinary('ValveResourceFormat/ValveResourceFormat', 'Decompiler');
     }
 
     /**
@@ -386,10 +434,36 @@ class CSGOCdn extends EventEmitter {
      * will also invert the csgo_english.txt file to make it easier to search for the correct item
      *
      */
-    loadResources() {
-        this.itemsGame = vdf.parse(this.vpkDir.getFile('scripts/items/items_game.txt').toString())['items_game'];
-        this.itemsGameCDN = this.parseItemsCDN(this.vpkDir.getFile('scripts/items/items_game_cdn.txt').toString());
-        this.csgoEnglish = vdf.parse(this.vpkDir.getFile('resource/csgo_english.txt').toString())['lang']['Tokens'];
+    async #loadResources() {
+        const repository = 'https://raw.githubusercontent.com/SteamDatabase/GameTracking-CS2/master/game/csgo/pak01_dir/';
+
+        let itemsGame;
+        if (existsSync(`./${this.config.directory}/${neededFiles.itemsGame}`)) {
+            itemsGame = await readFile(`./${this.config.directory}/${neededFiles.itemsGame}`, {encoding: 'utf-8'})
+        } else {
+            itemsGame = await downloadFile(`${repository}${neededFiles.itemsGame}`);
+            await writeFile(`./${this.config.directory}/${neededFiles.itemsGame}`, itemsGame, {encoding: "utf-8"});
+        }
+
+        let itemsGameCDN;
+        if (existsSync(`./${this.config.directory}/${neededFiles.itemsGameCdn}`))  {
+            itemsGameCDN = await readFile(`./${this.config.directory}/${neededFiles.itemsGameCdn}`, {encoding: 'utf-8'});
+        } else {
+            itemsGameCDN = await downloadFile(`${repository}${neededFiles.itemsGameCdn}`);
+            await writeFile(`./${this.config.directory}/${neededFiles.itemsGameCdn}`, itemsGameCDN, {encoding: 'utf-8'});
+        }
+
+        let csgoEnglish;
+        if (existsSync(`./${this.config.directory}/${neededFiles.csgoEnglish}`))  {
+            csgoEnglish = await readFile(`./${this.config.directory}/${neededFiles.csgoEnglish}`, {encoding: 'utf-8'});
+        } else {
+            csgoEnglish = await downloadFile(`${repository}${neededFiles.csgoEnglish}`);
+            await writeFile(`./${this.config.directory}/${neededFiles.csgoEnglish}`, csgoEnglish, {encoding: 'utf-8'});
+        }
+
+        this.itemsGame = vdf.parse(itemsGame)['items_game'];
+        this.itemsGameCDN = this.#parseItemsCDN(itemsGameCDN);
+        this.csgoEnglish = vdf.parse(csgoEnglish)['lang']['Tokens'];
 
         this.weaponNameMap = Object.keys(this.csgoEnglish).filter(n => n.startsWith("SFUI_WPNHUD"));
         this.csgoEnglishKeys = Object.keys(this.csgoEnglish);
@@ -403,7 +477,7 @@ class CSGOCdn extends EventEmitter {
             }
         });
 
-        this.invertDictionary(this.csgoEnglish);
+        this.#invertDictionary(this.csgoEnglish);
     }
 
     /**
@@ -413,7 +487,7 @@ class CSGOCdn extends EventEmitter {
      *
      * @param dict Dictionary to invert
      */
-    invertDictionary(dict) {
+    #invertDictionary(dict) {
         dict['inverted'] = {};
 
         for (const prop in dict) {
@@ -421,8 +495,8 @@ class CSGOCdn extends EventEmitter {
 
             const val = dict[prop];
 
-            if (typeof val === 'object' && !(val instanceof Array)) {
-                this.invertDictionary(val);
+            if (typeof val === 'object' && !Array.isArray(val)) {
+                this.#invertDictionary(val);
             }
             else {
                 if (dict['inverted'][val] === undefined) {
@@ -435,7 +509,7 @@ class CSGOCdn extends EventEmitter {
         }
     }
 
-    parseItemsCDN(data) {
+    #parseItemsCDN(data) {
         let lines = data.split('\n');
 
         const items_game_cdn = {};
@@ -454,7 +528,7 @@ class CSGOCdn extends EventEmitter {
     /**
      * Loads the CSGO dir VPK specified in the config
      */
-    loadVPK() {
+    #loadVPK() {
         this.vpkDir = new vpk(`${this.config.directory}/game/csgo/pak01_dir.vpk`);
         this.vpkDir.load();
 
@@ -467,13 +541,16 @@ class CSGOCdn extends EventEmitter {
      * Given the CSGO VPK Directory, returns the necessary indices for the chosen options
      * @return {Array} Necessary Sticker VPK Indices
      */
-    getRequiredVPKFiles() {
+    #getRequiredVPKFiles() {
         const requiredIndices = {};
 
-        const dirs = Object.keys(neededDirectories).filter((f) => !!this.config[f]).map((f) => neededDirectories[f]);
+        const dirs = Object
+            .keys(neededDirectories)
+            .filter((key) => !!this.config[key])
+            .map(key => neededDirectories[key]);
 
         for (const fileName of this.vpkDir.files) {
-            if (dirs.some((dir) => fileName.startsWith(dir)) || neededFiles[fileName]) {
+            if (dirs.some(dir => fileName.startsWith(dir)) || neededFiles[fileName]) {
                 const archiveIndex = this.vpkDir.tree[fileName].archiveIndex;
                 if(!requiredIndices[archiveIndex]) {
                     requiredIndices[archiveIndex] = true;
@@ -488,10 +565,10 @@ class CSGOCdn extends EventEmitter {
      * Downloads the required VPK files
      * @return {Promise<void>}
      */
-    async downloadVPKFiles() {
+    async #downloadVPKFiles() {
         this.log.debug('Computing required VPK files for selected packages');
 
-        const requiredIndices = this.getRequiredVPKFiles();
+        const requiredIndices = this.#getRequiredVPKFiles();
 
         this.log.debug(`Downloading Required VPK files ${requiredIndices}`);
 
@@ -511,7 +588,7 @@ class CSGOCdn extends EventEmitter {
 
         writeFileSync(`${this.config.directory}/${this.config.fileList}-${pid}`, filesToDownload.map((f) => f.fileName).join('\n'));
 
-        await this.downloadFiles();
+        await this.#downloadFiles();
 
         unlinkSync(`${this.config.directory}/${this.config.fileList}-${pid}`);
     }
@@ -521,7 +598,7 @@ class CSGOCdn extends EventEmitter {
      * Download the files from the filelist.txt via depotdownloader
      * @return {Promise<void>}
      */
-    async downloadFiles() {
+    async #downloadFiles() {
         return new Promise((resolve, reject) => {
             exec(`./${this.config.directory}/${this.config.depotDownloader} -app ${APP_ID} -depot ${DEPOT_ID} -filelist ${this.config.directory}/${this.config.fileList}-${pid} -dir ${this.config.directory} -os windows -osarch 64 max-downloads 16 -max-servers 40 -validate`, (error, stdout) => {
                 if (error) {
@@ -607,6 +684,8 @@ class CSGOCdn extends EventEmitter {
         const fileName = large ? `${name}_large_png` : `${name}_png`;
         const path = this.vpkStickerFiles.find((t) => t.endsWith(`${fileName}.vtex_c`));
 
+        console.log(path)
+        console.log(this.vpkStickerFiles.filter(f => f.includes(fileName)))
         if (path) return this.getPathURL(path, 'local');
     }
 
@@ -764,6 +843,7 @@ class CSGOCdn extends EventEmitter {
         const stickerName = match[1];
 
         for (const tag of this.csgoEnglish['inverted'][stickerName] || []) {
+            console.log(tag)
             const stickerTag = `#${tag}`;
 
             const stickerKits = this.itemsGame.sticker_kits;
@@ -776,9 +856,12 @@ class CSGOCdn extends EventEmitter {
 
             const kit  = stickerKits[kitIndex];
 
+            console.log(kit)
+
             if (!kit || !kit.sticker_material) continue;
 
             const url = this.getStickerURL(stickerKits[kitIndex].sticker_material, true);
+            console.log(url)
 
             if (url) {
                 return url;

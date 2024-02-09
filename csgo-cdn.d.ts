@@ -46,6 +46,7 @@ declare module "csgo-cdn" {
     cases: boolean, // whether to obtain the vpk for cases
     tools: boolean, // whether to obtain the vpk for tools
     statusIcons: boolean, // whether to obtain the vpk for status icons
+    lang?: string // Optional language support
   }
 
   export default class CsgoCdn extends EventEmitter {
@@ -58,6 +59,7 @@ declare module "csgo-cdn" {
     getItemNameURL(marketHashName: string, phase?: CsgoCdnSkinPhases): string | undefined | null;
     getStickerURL(stickerName: string, large?: boolean): string | undefined | null;
     getWeaponURL(defindex: number, paintindex: number): string | undefined | null;
+    getPatchURL(marketHashName: string): string | undefined;
 
     on( event: 'ready', listener: () => void ): this;
   }
