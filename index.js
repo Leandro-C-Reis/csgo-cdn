@@ -902,7 +902,7 @@ class CSGOCdn extends EventEmitter {
 
             if (!kit || !kit.patch_material) continue;
 
-            const url = this.getPatchURL(stickerKits[kitIndex].patch_material, true);
+            const url = this.getPatchURL(stickerKits[kitIndex].patch_material, false);
 
             if (url) return url;
         }
@@ -951,7 +951,7 @@ class CSGOCdn extends EventEmitter {
 
                 if (!kit || !kit.sticker_material) continue;
 
-                const url = this.getStickerURL(kit.sticker_material, true);
+                const url = this.getStickerURL(kit.sticker_material, false);
 
                 if (url) {
                     return url;
