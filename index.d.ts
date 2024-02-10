@@ -47,6 +47,7 @@ declare module "csgo-cdn" {
     tools: boolean, // whether to obtain the vpk for tools
     statusIcons: boolean, // whether to obtain the vpk for status icons
     downloadVPK: boolean, // whether to download the vpk files
+    dump: boolean, // dump image files and pre-process sha1 hashes
     lang?: string // Optional language support
   }
 
@@ -61,6 +62,13 @@ declare module "csgo-cdn" {
     getStickerURL(stickerName: string, large?: boolean): string | undefined | null;
     getWeaponURL(defindex: number, paintindex: number): string | undefined | null;
     getPatchURL(marketHashName: string): string | undefined;
+    getStatusIconURL(name: string, size: string): string | undefined;
+    isWeapon(marketHashName: string): boolean;
+    getStickerNameURL(marketHashName: string): string | undefined;
+    getPatchNameURL(marketHashName: string): string | undefined;
+    getGraffitiNameURL(marketHashName: string, large?: boolean): string | undefined;
+    getWeaponNameURL(marketHashName: string, phase?: CsgoCdnSkinPhases): string | undefined;
+    getMusicKitNameURL(marketHashName: string): string | undefined;
 
     on( event: 'ready', listener: () => void ): this;
   }

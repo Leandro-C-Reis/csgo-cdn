@@ -1,9 +1,9 @@
 import EventEmitter from 'events';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync, statSync } from 'fs';
-import { readFile, writeFile } from 'fs/promises';
+import { readFile, writeFile, readdir, stat, appendFile, rm, unlink } from 'fs/promises';
 import vpk from 'vpk';
 import vdf from 'simple-vdf';
-import { hashSync } from 'hasha';
+import { hashSync, hashFile } from 'hasha';
 import winston from 'winston';
 import { exec } from 'child_process';
 import { HttpClient } from '@doctormckay/stdlib/http.js'
@@ -11,6 +11,7 @@ import AdmZip from 'adm-zip';
 import os from 'node:os';
 import { pid } from 'node:process';
 import https from 'https';
+import PATH from 'path'
 
 const defaultConfig = {
     directory: 'data',
@@ -23,7 +24,8 @@ const defaultConfig = {
     cases: true,
     tools: true,
     statusIcons: true,
-    downloadVPK: false,
+    downloadVPK: true,
+    dump: true,
     logLevel: 'info',
     vrfBinary: 'Decompiler',
     depotDownloader: 'DepotDownloader',
@@ -81,6 +83,29 @@ const downloadFile = function(url) {
         });
     })
 };
+
+/** Reads an entire directory recursively and returns and array of with all files */
+const getDirFiles = async (path) => {
+    const files = [];
+
+    for await (const file of await readdir(path)) {
+        const filepath = PATH.join(path, file);
+        const status = await stat(filepath);
+        
+        if (status.isFile()) {
+            files.push(filepath);
+        }
+
+        if (status.isDirectory()) {
+            const subfiles = await getDirFiles(filepath);
+            for (const subfile of subfiles) {
+                files.push(subfile);
+            }
+        }
+    }
+
+    return files;
+}
 
 class CSGOCdn extends EventEmitter {
     get ready() {
@@ -270,16 +295,14 @@ class CSGOCdn extends EventEmitter {
             await this.#downloadDepotDownloader();
         }
 
-        await writeFile(`${this.config.directory}/${this.config.fileList}-${pid}`, 'game\\csgo\\pak01_dir.vpk');
-
-        this.log.debug('Downloading require static files');
-
-        await this.#downloadFiles();
-
-        unlinkSync(`${this.config.directory}/${this.config.fileList}-${pid}`);
+        if (this.config.downloadVPK) {
+            await writeFile(`${this.config.directory}/${this.config.fileList}-${pid}`, 'game\\csgo\\pak01_dir.vpk');
+            this.log.debug('Downloading require static files');
+            await this.#downloadFiles();
+            await unlink(`${this.config.directory}/${this.config.fileList}-${pid}`);
+        }
 
         this.log.debug('Loading static file resources');
-
         this.#loadVPK();
 
         if (this.config.downloadVPK) {
@@ -287,28 +310,6 @@ class CSGOCdn extends EventEmitter {
         }
 
         this.#loadResources();
-
-        const pathsToDump = Object
-            .keys(neededDirectories)
-            .filter((key) => this.config[key] === true)
-            .map((key) => neededDirectories[key])
-
-        // In CS:GO it was possible to just extract the image from the VPK, in CS2 this is not the case anymore
-        // to work around this, we will still download all the required VPK's but then using https://github.com/ValveResourceFormat/ValveResourceFormat
-        // we will extract the images from the VPK's directly and save them locally.
-        // With that we can then use the images to generate the file path.
-        await Promise.all(
-            pathsToDump.map((path) => new Promise((resolve, reject) => {
-                this.log.debug(`Dumping ${path}...`);
-                exec(`${this.config.directory}/${this.config.vrfBinary} --input ${this.config.directory}/game/csgo/pak01_dir.vpk --vpk_filepath ${path} -o ${this.config.directory} -d > /dev/null`, (error) => {
-                    if (error) {
-                        console.error(`exec error: ${error}`);
-                    }
-
-                    resolve();
-                });
-            }))
-        );
 
         this.log.info('Finished updating CS:GO files');
         this.ready = true;
@@ -489,6 +490,44 @@ class CSGOCdn extends EventEmitter {
         });
 
         this.#invertDictionary(this.csgoEnglish);
+
+        if (this.config.dump) {
+            const pathsToDump = Object
+                .keys(neededDirectories)
+                .filter((key) => this.config[key] === true)
+                .map((key) => neededDirectories[key])
+    
+            // In CS:GO it was possible to just extract the image from the VPK, in CS2 this is not the case anymore
+            // to work around this, we will still download all the required VPK's but then using https://github.com/ValveResourceFormat/ValveResourceFormat
+            // we will extract the images from the VPK's directly and save them locally.
+            // With that we can then use the images to generate the file path.
+            await Promise.all(
+                pathsToDump.map((path) => new Promise((resolve, reject) => {
+                    this.log.debug(`Dumping ${path}...`);
+                    exec(`${this.config.directory}/${this.config.vrfBinary} --input ${this.config.directory}/game/csgo/pak01_dir.vpk --vpk_filepath ${path} -o ${this.config.directory} -d > /dev/null`, (error) => {
+                        if (error) {
+                            console.error(`exec error: ${error}`);
+                        }
+    
+                        resolve();
+                    });
+                }))
+            );
+    
+            this.log.info(`Preprocessing panorama sha1 hashes`);
+            // Apply sha1 hash to each file in panorama directory
+            // and save to a storage file. 
+            for await (const filepath of await getDirFiles(`${this.config.directory}/panorama`)) {
+                const sha1 = await hashFile(filepath, { algorithm:'sha1' });
+                await appendFile(`${this.config.directory}/resource/panorama.txt`, `${filepath} ${sha1}\n`, {encoding:'utf-8'});
+            }
+
+            await rm(`${this.config.directory}/panorama`, {recursive: true});
+        }
+
+        this.panorama = await readFile(`${this.config.directory}/resource/panorama.txt`, {encoding: 'utf-8'})
+            .then(panorama => panorama.split('\n').map(line => line.split(' ')))
+            .then(panoramaEntries => Object.fromEntries(panoramaEntries));
     }
 
     /**
@@ -642,31 +681,38 @@ class CSGOCdn extends EventEmitter {
      */
     getPathURL(path, type='vpk') {
         let file;
+        let sha1;
+
         if(type === 'vpk') {
             this.log.debug(`Reading vpk ${path}...`);
             file = this.vpkDir.getFile(path);
         } else if(type === 'local') {
             path = path.replace('.vtex_c', '.png');
+            
             if(!path.endsWith('.png')) {
                 path = `${path}.png`
             }
-            this.log.debug(`Reading local file ${this.config.directory + '/' + path}...`);
+            
+            this.log.debug(`Reading local file "${this.config.directory + '/' + path}"`);
             // check if file exists
-            if (!existsSync(`./${this.config.directory}/${path}`)) {
+            if (!this.panorama[`${this.config.directory}/${path}`]) {
                 this.log.error(`Failed to retrieve ${path} in VPK, do you have the package category enabled in options?`);
                 return;
             }
-            file = readFileSync(`./${this.config.directory}/${path}`)
+            
+            sha1 = this.panorama[`${this.config.directory}/${path}`];
         }
 
-        if (!file) {
+        if (!file && !sha1) {
             this.log.error(`Failed to retrieve ${path} in VPK, do you have the package category enabled in options?`);
             return;
         }
 
-        const sha1 = hashSync(file, {
-            'algorithm': 'sha1'
-        });
+        if (!sha1) {
+            sha1 = hashSync(file, {
+                'algorithm': 'sha1'
+            });
+        }
 
         path = path.replace('panorama/images', 'icons');
         path = path.replace('.png', `.${sha1}.png`);
