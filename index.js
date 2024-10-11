@@ -16,16 +16,20 @@ import PATH from 'path'
 const defaultConfig = {
     directory: 'data',
     updateInterval: 30000,
-    stickers: true,
-    patches: true,
-    graffiti: true,
-    characters: true,
-    musicKits: true,
-    cases: true,
-    tools: true,
-    statusIcons: true,
-    downloadVPK: true,
-    dump: true,
+    stickers: false,
+    keychains: false,
+    patches: false,
+    graffiti: false,
+    characters: false,
+    musicKits: false,
+    cases: false,
+    tools: false,
+    statusIcons: false,
+    weapons: false,
+    vanilla: false,
+    gloves: false,
+    downloadVPK: false,
+    dump: false,
     logLevel: 'info',
     vrfBinary: 'Decompiler',
     depotDownloader: 'DepotDownloader',
@@ -41,6 +45,7 @@ const ECON_PATH = 'panorama/images/econ';
 
 const neededDirectories = {
     stickers: `${ECON_PATH}/stickers`,
+    keychains: `${ECON_PATH}/keychains`,
     patches: `${ECON_PATH}/patches`,
     graffiti: `${ECON_PATH}/stickers/default`,
     characters: `${ECON_PATH}/characters`,
@@ -48,6 +53,8 @@ const neededDirectories = {
     cases: `${ECON_PATH}/weapon_cases`,
     tools: `${ECON_PATH}/tools`,
     statusIcons: `${ECON_PATH}/status_icons`,
+    weapons: `${ECON_PATH}/default_generated`,
+    vanilla: `${ECON_PATH}/weapons`,
 };
 
 const neededFiles = {
@@ -309,7 +316,7 @@ class CSGOCdn extends EventEmitter {
             await this.#downloadVPKFiles();
         }
 
-        this.#loadResources();
+        await this.#loadResources();
 
         this.log.info('Finished updating CS:GO files');
         this.ready = true;
@@ -582,7 +589,7 @@ class CSGOCdn extends EventEmitter {
         this.vpkDir = new vpk(`${this.config.directory}/game/csgo/pak01_dir.vpk`);
         this.vpkDir.load();
 
-        this.vpkStickerFiles = this.vpkDir.files.filter((f) => f.startsWith(neededDirectories.stickers));
+        this.vpkStickerFiles = this.vpkDir.files.filter((f) => f.startsWith(neededDirectories.stickers) || f.startsWith(neededDirectories.keychains));
         this.vpkPatchFiles = this.vpkDir.files.filter((f) => f.startsWith(neededDirectories.patches));
         this.vpkStatusIconFiles = this.vpkDir.files.filter((f) => f.startsWith(neededDirectories.statusIcons));
     }

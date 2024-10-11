@@ -5,11 +5,19 @@ const user = new SteamUser();
 const cdn = new CSGOCdn(
     user,
     {
-        logLevel: 'debug'
+        logLevel: 'debug',
+        updateInterval: -1,
+        stickers: true,
+        patches: true,
+        graffiti: false,
+        keychains: true,
+        downloadVPK: true,
+        dump: true,
     }
 );
 
 cdn.on('ready', () => {
+    console.log('missinglink/kc_missinglink_ava', cdn.getStickerURL('missinglink/kc_missinglink_ava', false));
     console.log('cologne2016/astr_gold', cdn.getStickerURL('cologne2016/astr_gold', false));
     console.log('cologne2016/astr_gold large', cdn.getStickerURL('cologne2016/astr_gold', true));
     console.log('case01/patch_phoenix', cdn.getPatchURL('case01/patch_phoenix', false));
